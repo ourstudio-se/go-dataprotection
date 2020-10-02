@@ -3,6 +3,7 @@ package azure
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,8 +70,8 @@ type BlobFile struct {
 type azureKeyFileFormat struct {
 	ID        string `json:"id"`
 	Secret    string `json:"secret"`
-	NotBefore string `json:"notBefore"`
-	NotAfter  string `json:"notAfter"`
+	NotBefore string `json:"not_before"`
+	NotAfter  string `json:"not_after"`
 }
 
 func WithBlob(opts ...BlobConfigOption) dataprotection.ProtectorOption {
@@ -190,9 +191,14 @@ func (bf *BlobFile) downloadKeys(u azblob.BlobURL) ([]dataprotection.RotationKey
 			continue
 		}
 
+		decodedSecret, err := base64.RawURLEncoding.DecodeString(ak.Secret)
+		if err != nil {
+			continue
+		}
+
 		keys = append(keys, dataprotection.RotationKey{
 			ID:        ak.ID,
-			Secret:    []byte(ak.Secret),
+			Secret:    decodedSecret,
 			NotBefore: notBefore,
 			NotAfter:  notAfter,
 		})
@@ -213,9 +219,11 @@ func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationK
 
 	var azureKeys []*azureKeyFileFormat
 	for _, k := range bf.keys {
+		encodedSecret := base64.RawURLEncoding.EncodeToString(k.Secret)
+
 		azureKeys = append(azureKeys, &azureKeyFileFormat{
 			ID:        k.ID,
-			Secret:    string(k.Secret),
+			Secret:    encodedSecret,
 			NotBefore: k.NotBefore.Format(time.RFC3339),
 			NotAfter:  k.NotAfter.Format(time.RFC3339),
 		})

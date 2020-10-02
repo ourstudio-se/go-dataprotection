@@ -1,6 +1,7 @@
 package dataprotection
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -15,8 +16,8 @@ type localKeyFile struct {
 type localKeyFileFormat struct {
 	ID        string `json:"id"`
 	Secret    string `json:"secret"`
-	NotBefore string `json:"notBefore"`
-	NotAfter  string `json:"notAfter"`
+	NotBefore string `json:"not_before"`
+	NotAfter  string `json:"not_after"`
 }
 
 func newLocalFile(fp string) *localKeyFile {
@@ -56,9 +57,14 @@ func (l *localKeyFile) GetKeys() ([]RotationKey, error) {
 			continue
 		}
 
+		decodedSecret, err := base64.RawURLEncoding.DecodeString(lk.Secret)
+		if err != nil {
+			continue
+		}
+
 		keys = append(keys, RotationKey{
 			ID:        lk.ID,
-			Secret:    []byte(lk.Secret),
+			Secret:    decodedSecret,
 			NotBefore: notBefore,
 			NotAfter:  notAfter,
 		})
@@ -72,9 +78,11 @@ func (l *localKeyFile) AddKey(key RotationKey) error {
 
 	var localKeys []*localKeyFileFormat
 	for _, k := range keys {
+		encodedSecret := base64.RawURLEncoding.EncodeToString(k.Secret)
+
 		localKeys = append(localKeys, &localKeyFileFormat{
 			ID:        k.ID,
-			Secret:    string(k.Secret),
+			Secret:    encodedSecret,
 			NotBefore: k.NotBefore.Format(time.RFC3339),
 			NotAfter:  k.NotAfter.Format(time.RFC3339),
 		})
