@@ -76,7 +76,11 @@ func New(scheme Scheme, opts ...ProtectorOption) (*Protector, error) {
 	if len(keys) == 0 {
 		key, err := impl.GenerateKey()
 		if err != nil {
-			return nil, fmt.Errorf("data protection: %w", err)
+			return nil, fmt.Errorf("data protection: key error: %w", err)
+		}
+
+		if err := p.backend.AddKey(key); err != nil {
+			return nil, fmt.Errorf("data protection: key error: %w", err)
 		}
 
 		keys = append(keys, key)
