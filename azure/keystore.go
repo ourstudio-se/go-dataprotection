@@ -236,8 +236,8 @@ func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationK
 		}
 	}
 
-	azureKeys := make([]*azureKeyFileFormat, len(bf.keys))
-	for _, k := range bf.keys {
+	azureKeys := make([]*azureKeyFileFormat, len(keys))
+	for _, k := range keys {
 		encodedSecret := base64.RawURLEncoding.EncodeToString(k.Secret)
 
 		azureKeys = append(azureKeys, &azureKeyFileFormat{
