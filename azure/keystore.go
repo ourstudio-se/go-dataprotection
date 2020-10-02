@@ -266,10 +266,17 @@ func (bf *BlobFile) blobExist() (bool, error) {
 		return false, err
 	}
 
-	r, err := u.GetProperties(context.Background(), azblob.BlobAccessConditions{})
-	if r != nil && r.StatusCode() == http.StatusNotFound {
+	_, err = u.GetProperties(context.Background(), azblob.BlobAccessConditions{})
+
+	storageErr, ok := err.(azblob.StorageError)
+	if !ok {
+		return false, err
+	}
+
+	if storageErr.Response().StatusCode == http.StatusNotFound {
 		return false, nil
 	}
+
 	if err != nil {
 		return false, err
 	}
