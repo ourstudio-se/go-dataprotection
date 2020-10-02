@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"time"
 
@@ -107,6 +108,17 @@ func New(opts ...BlobConfigOption) (*BlobFile, error) {
 		return nil, fmt.Errorf("blob file: container error: %w", err)
 	}
 
+	exist, err := bf.blobExist()
+	if err != nil {
+		return nil, fmt.Errorf("blob file: service unavailable: %w", err)
+	}
+
+	if !exist {
+		if err := bf.initBlob(); err != nil {
+			return nil, fmt.Errorf("blob file: service unavailable: %w", err)
+		}
+	}
+
 	_, _ = u.Create(context.Background(), azblob.Metadata{}, azblob.PublicAccessNone)
 	return bf, nil
 }
@@ -134,7 +146,7 @@ func (bf *BlobFile) AddKey(key dataprotection.RotationKey) error {
 		return fmt.Errorf("blob file: failed connecting to blob: %w", err)
 	}
 
-	if err := bf.uploadKeys(u, keys); err != nil {
+	if err := bf.uploadKeys(u, keys, false); err != nil {
 		return err
 	}
 
@@ -207,14 +219,16 @@ func (bf *BlobFile) downloadKeys(u azblob.BlobURL) ([]dataprotection.RotationKey
 	return keys, nil
 }
 
-func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationKey) error {
+func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationKey, skipLease bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
 	leaseID := uuid.New().String()
-	_, err := u.AcquireLease(ctx, leaseID, 60, azblob.ModifiedAccessConditions{})
-	if err != nil {
-		return fmt.Errorf("blob file: could not lock key file: %w", err)
+	if !skipLease {
+		_, err := u.AcquireLease(ctx, leaseID, 60, azblob.ModifiedAccessConditions{})
+		if err != nil {
+			return fmt.Errorf("blob file: could not lock key file: %w", err)
+		}
 	}
 
 	var azureKeys []*azureKeyFileFormat
@@ -239,7 +253,35 @@ func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationK
 		return fmt.Errorf("blob file: failed to upload keys: %w", err)
 	}
 
-	_, _ = u.ReleaseLease(ctx, leaseID, azblob.ModifiedAccessConditions{})
+	if !skipLease {
+		_, _ = u.ReleaseLease(ctx, leaseID, azblob.ModifiedAccessConditions{})
+	}
 
 	return nil
+}
+
+func (bf *BlobFile) blobExist() (bool, error) {
+	u, err := bf.blobURL()
+	if err != nil {
+		return false, err
+	}
+
+	r, err := u.GetProperties(context.Background(), azblob.BlobAccessConditions{})
+	if r != nil && r.StatusCode() == http.StatusNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (bf *BlobFile) initBlob() error {
+	u, err := bf.blobURL()
+	if err != nil {
+		return err
+	}
+
+	return bf.uploadKeys(u, []dataprotection.RotationKey{}, true)
 }
