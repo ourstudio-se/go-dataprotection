@@ -224,14 +224,19 @@ func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationK
 	defer cancel()
 
 	leaseID := uuid.New().String()
+	azBlobAccessConditions := azblob.BlobAccessConditions{}
 	if !skipLease {
 		_, err := u.AcquireLease(ctx, leaseID, 60, azblob.ModifiedAccessConditions{})
 		if err != nil {
 			return fmt.Errorf("blob file: could not lock key file: %w", err)
 		}
+
+		azBlobAccessConditions.LeaseAccessConditions = azblob.LeaseAccessConditions{
+			LeaseID: leaseID,
+		}
 	}
 
-	var azureKeys []*azureKeyFileFormat
+	azureKeys := make([]*azureKeyFileFormat, len(bf.keys))
 	for _, k := range bf.keys {
 		encodedSecret := base64.RawURLEncoding.EncodeToString(k.Secret)
 
@@ -248,7 +253,11 @@ func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationK
 		return fmt.Errorf("blob file: could not serialize JSON: %w", err)
 	}
 
-	_, err = u.ToBlockBlobURL().Upload(ctx, bytes.NewReader(b), azblob.BlobHTTPHeaders{}, azblob.Metadata{}, azblob.BlobAccessConditions{})
+	_, err = u.ToBlockBlobURL().Upload(ctx,
+		bytes.NewReader(b),
+		azblob.BlobHTTPHeaders{},
+		azblob.Metadata{},
+		azBlobAccessConditions)
 	if err != nil {
 		return fmt.Errorf("blob file: failed to upload keys: %w", err)
 	}
