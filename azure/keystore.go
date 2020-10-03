@@ -276,6 +276,9 @@ func (bf *BlobFile) blobExist() (bool, error) {
 	}
 
 	_, err = u.GetProperties(context.Background(), azblob.BlobAccessConditions{})
+	if err == nil {
+		return true, nil
+	}
 
 	storageErr, ok := err.(azblob.StorageError)
 	if !ok {
