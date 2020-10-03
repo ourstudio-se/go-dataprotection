@@ -220,6 +220,10 @@ func (bf *BlobFile) downloadKeys(u azblob.BlobURL) ([]dataprotection.RotationKey
 }
 
 func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationKey, skipLease bool) error {
+	if len(keys) == 0 {
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
