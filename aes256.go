@@ -14,7 +14,6 @@ import (
 
 type AES256 struct {
 	Authenticator
-	signer RotationKey
 	keyset map[string]RotationKey
 }
 
@@ -22,7 +21,7 @@ const aes256KeySize = 32
 
 func NewAES256(validator Authenticator) *AES256 {
 	keyset := make(map[string]RotationKey)
-	return &AES256{validator, RotationKey{}, keyset}
+	return &AES256{validator, keyset}
 }
 
 func (a *AES256) GenerateKey() (RotationKey, error) {
@@ -40,11 +39,7 @@ func (a *AES256) GenerateKey() (RotationKey, error) {
 }
 
 func (a *AES256) WithKey(key RotationKey) error {
-	if len(a.signer.Secret) == 0 {
-		a.signer = key
-	}
-
-	prefix := a.signer.EncodeID()
+	prefix := key.EncodeID()
 	if _, ok := a.keyset[prefix]; ok {
 		return fmt.Errorf("AES256: key with prefix %s already exists", prefix)
 	}
@@ -54,12 +49,20 @@ func (a *AES256) WithKey(key RotationKey) error {
 }
 
 func (a *AES256) Protect(plain []byte) ([]byte, error) {
-	key := a.signer
-
-	if len(key.Secret) == 0 {
-		return nil, errors.New("AES256: signing key not initialized")
+	key, err := a.latestKey()
+	if err != nil {
+		return nil, fmt.Errorf("AES256: signing key not available: %w", err)
 	}
 
+	signed, err := a.protect(plain, key)
+	if err != nil {
+		return nil, err
+	}
+
+	return a.wrapKeyID(key, signed), nil
+}
+
+func (a *AES256) protect(plain []byte, key RotationKey) ([]byte, error) {
 	c, err := aes.NewCipher(key.Secret)
 	if err != nil {
 		return nil, errors.New("AES256: unable to create cipher")
@@ -81,16 +84,20 @@ func (a *AES256) Protect(plain []byte) ([]byte, error) {
 		return nil, fmt.Errorf("AES256: unable to sign data: %w", err)
 	}
 
-	return a.withKeyID(key, signed), nil
+	return signed, nil
 }
 
 func (a *AES256) Unprotect(ciphertext []byte) ([]byte, error) {
-	key, ciphertext, err := a.fromKeyID(ciphertext)
+	key, ciphertext, err := a.unwrapKeyID(ciphertext)
 	if err != nil {
 		return nil, fmt.Errorf("AES256: key mismatch: %w", err)
 	}
 
-	ciphertext, err = a.Verify(key.Secret, ciphertext)
+	return a.unprotect(ciphertext, key)
+}
+
+func (a *AES256) unprotect(ciphertext []byte, key RotationKey) ([]byte, error) {
+	ciphertext, err := a.Verify(key.Secret, ciphertext)
 	if err != nil {
 		return nil, fmt.Errorf("AES256: verification failed: %w", err)
 	}
@@ -119,18 +126,45 @@ func (a *AES256) Unprotect(ciphertext []byte) ([]byte, error) {
 	return plain, nil
 }
 
-func (a *AES256) withKeyID(key RotationKey, ciphertext []byte) []byte {
+func (a *AES256) wrapKeyID(key RotationKey, ciphertext []byte) []byte {
 	keyID := []byte(key.EncodeID())
 	return append(keyID, ciphertext...)
 }
 
-func (a *AES256) fromKeyID(ciphertext []byte) (RotationKey, []byte, error) {
+func (a *AES256) unwrapKeyID(ciphertext []byte) (RotationKey, []byte, error) {
+	fmt.Printf("%v\n", a.keyset)
 	keyID, rest := ExtractKeyID(ciphertext)
-
+	fmt.Printf("%s\n", keyID)
 	key, ok := a.keyset[keyID]
 	if !ok {
 		return RotationKey{}, nil, fmt.Errorf("could not find key {%s}", keyID)
 	}
 
 	return key, rest, nil
+}
+
+func (a *AES256) latestKey() (RotationKey, error) {
+	if len(a.keyset) == 0 {
+		return RotationKey{}, errors.New("no keys available")
+	}
+
+	key := RotationKey{}
+	for _, v := range a.keyset {
+		if len(key.Secret) == 0 {
+			key = v
+			continue
+		}
+
+		if !v.Valid() {
+			continue
+		}
+
+		if key.NotAfter.After(v.NotAfter) {
+			continue
+		}
+
+		key = v
+	}
+
+	return key, nil
 }
