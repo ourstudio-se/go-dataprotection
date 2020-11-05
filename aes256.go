@@ -132,9 +132,7 @@ func (a *AES256) wrapKeyID(key RotationKey, ciphertext []byte) []byte {
 }
 
 func (a *AES256) unwrapKeyID(ciphertext []byte) (RotationKey, []byte, error) {
-	fmt.Printf("%v\n", a.keyset)
 	keyID, rest := ExtractKeyID(ciphertext)
-	fmt.Printf("%s\n", keyID)
 	key, ok := a.keyset[keyID]
 	if !ok {
 		return RotationKey{}, nil, fmt.Errorf("could not find key {%s}", keyID)
