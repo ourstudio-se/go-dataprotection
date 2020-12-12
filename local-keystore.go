@@ -10,7 +10,7 @@ import (
 
 type localKeyFile struct {
 	fp   string
-	keys []RotationKey
+	keys []SymmetricKey
 }
 
 type localKeyFileFormat struct {
@@ -24,6 +24,8 @@ func newLocalFile(fp string) *localKeyFile {
 	return &localKeyFile{fp, nil}
 }
 
+// WithFile sets up a local file
+// as the Backend for a Protector
 func WithFile(fp string) ProtectorOption {
 	return func(p *Protector) error {
 		p.backend = newLocalFile(fp)
@@ -31,7 +33,9 @@ func WithFile(fp string) ProtectorOption {
 	}
 }
 
-func (l *localKeyFile) GetKeys() ([]RotationKey, error) {
+// GetKeys returns any SymmetricKeys stored
+// in the local file backend
+func (l *localKeyFile) GetKeys() ([]SymmetricKey, error) {
 	b, err := ioutil.ReadFile(l.fp)
 	if err != nil {
 		if err := ioutil.WriteFile(l.fp, []byte("[]"), 0644); err != nil {
@@ -45,7 +49,7 @@ func (l *localKeyFile) GetKeys() ([]RotationKey, error) {
 		return nil, fmt.Errorf("local file error: invalid JSON: %w", err)
 	}
 
-	var keys []RotationKey
+	var keys []SymmetricKey
 	for _, lk := range localKeys {
 		notBefore, err := time.Parse(time.RFC3339, lk.NotBefore)
 		if err != nil {
@@ -62,7 +66,7 @@ func (l *localKeyFile) GetKeys() ([]RotationKey, error) {
 			continue
 		}
 
-		keys = append(keys, RotationKey{
+		keys = append(keys, SymmetricKey{
 			ID:        lk.ID,
 			Secret:    decodedSecret,
 			NotBefore: notBefore,
@@ -73,7 +77,10 @@ func (l *localKeyFile) GetKeys() ([]RotationKey, error) {
 	return keys, nil
 }
 
-func (l *localKeyFile) AddKey(key RotationKey) error {
+// AddKey adds a SymmetricKey to the
+// local file backend, to be used for
+// protecting secrets
+func (l *localKeyFile) AddKey(key SymmetricKey) error {
 	keys := append(l.keys, key)
 
 	var localKeys []*localKeyFileFormat

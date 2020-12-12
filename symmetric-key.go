@@ -5,14 +5,18 @@ import (
 	"time"
 )
 
-type RotationKey struct {
+// SymmetricKey is a key used for encrypting
+// and decrypting secrets
+type SymmetricKey struct {
 	ID        string
 	Secret    []byte
 	NotBefore time.Time
 	NotAfter  time.Time
 }
 
-func (k RotationKey) Valid() bool {
+// Valid validates a SymmetricKey, making sure
+// it hasn't expired or isn't set for usage yet
+func (k SymmetricKey) Valid() bool {
 	if time.Now().UTC().Before(k.NotBefore) {
 		return false
 	}
@@ -24,11 +28,15 @@ func (k RotationKey) Valid() bool {
 	return true
 }
 
-func (k RotationKey) EncodeID() string {
+// EncodeID returns the SymmetricKey ID in
+// an encoded form
+func (k SymmetricKey) EncodeID() string {
 	prefix := []byte(k.ID)[:8]
 	return base64.RawURLEncoding.EncodeToString(prefix)
 }
 
+// ExtractKeyID returns the SymmetricKey ID
+// from a ciphered byte array
 func ExtractKeyID(b []byte) (string, []byte) {
 	prefix, rest := b[:11], b[11:]
 	return string(prefix), rest

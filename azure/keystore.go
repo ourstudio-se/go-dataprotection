@@ -19,6 +19,8 @@ import (
 const defaultContainerName = "dataprotection"
 const defaultBlobFileName = "data-protection-keys"
 
+// BlobConfig sets up the configuration needed
+// to access a Azure Blob Storage
 type BlobConfig struct {
 	accountName string
 	credential  azblob.Credential
@@ -26,8 +28,11 @@ type BlobConfig struct {
 	filename    string
 }
 
+// BlobConfigOption is a functional option
 type BlobConfigOption func(*BlobConfig) error
 
+// WithCredentials sets up the credentials
+// used for accessing Azure Blob Storage
 func WithCredentials(accountName, accountKey string) BlobConfigOption {
 	return func(c *BlobConfig) error {
 		credential, err := azblob.NewSharedKeyCredential(accountName, accountKey)
@@ -41,6 +46,8 @@ func WithCredentials(accountName, accountKey string) BlobConfigOption {
 	}
 }
 
+// WithContainer sets up the container to use
+// when storing the key set
 func WithContainer(containerName string) BlobConfigOption {
 	return func(c *BlobConfig) error {
 		if containerName == "" {
@@ -52,6 +59,8 @@ func WithContainer(containerName string) BlobConfigOption {
 	}
 }
 
+// WithFile sets up which file to store the
+// key set in
 func WithFile(fileName string) BlobConfigOption {
 	return func(c *BlobConfig) error {
 		if fileName == "" {
@@ -63,9 +72,10 @@ func WithFile(fileName string) BlobConfigOption {
 	}
 }
 
+// BlobFile represents a file on Azure Blob Storage
 type BlobFile struct {
 	cfg  *BlobConfig
-	keys []dataprotection.RotationKey
+	keys []dataprotection.SymmetricKey
 }
 
 type azureKeyFileFormat struct {
@@ -75,6 +85,8 @@ type azureKeyFileFormat struct {
 	NotAfter  string `json:"not_after"`
 }
 
+// WithBlob sets up the blob to use when
+// storing a key set on Azure Blob Storage
 func WithBlob(opts ...BlobConfigOption) dataprotection.ProtectorOption {
 	return func(p *dataprotection.Protector) error {
 		bf, err := New(opts...)
@@ -87,6 +99,8 @@ func WithBlob(opts ...BlobConfigOption) dataprotection.ProtectorOption {
 	}
 }
 
+// New sets up a new Azure Blob Storage backend
+// to use for storing a key set
 func New(opts ...BlobConfigOption) (*BlobFile, error) {
 	cfg := &BlobConfig{}
 	cfg.container = defaultContainerName
@@ -123,7 +137,9 @@ func New(opts ...BlobConfigOption) (*BlobFile, error) {
 	return bf, nil
 }
 
-func (bf *BlobFile) GetKeys() ([]dataprotection.RotationKey, error) {
+// GetKeys returns any available keys from the
+// Azure Blob Storage
+func (bf *BlobFile) GetKeys() ([]dataprotection.SymmetricKey, error) {
 	u, err := bf.blobURL()
 	if err != nil {
 		return nil, fmt.Errorf("blob file: failed connecting to blob: %w", err)
@@ -138,7 +154,9 @@ func (bf *BlobFile) GetKeys() ([]dataprotection.RotationKey, error) {
 	return keys, nil
 }
 
-func (bf *BlobFile) AddKey(key dataprotection.RotationKey) error {
+// AddKey appends a key to the key set stored in
+// Azure Blob Storage
+func (bf *BlobFile) AddKey(key dataprotection.SymmetricKey) error {
 	keys := append(bf.keys, key)
 
 	u, err := bf.blobURL()
@@ -173,10 +191,10 @@ func (bf *BlobFile) blobURL() (azblob.BlobURL, error) {
 	return u.NewBlobURL(bf.cfg.filename), nil
 }
 
-func (bf *BlobFile) downloadKeys(u azblob.BlobURL) ([]dataprotection.RotationKey, error) {
+func (bf *BlobFile) downloadKeys(u azblob.BlobURL) ([]dataprotection.SymmetricKey, error) {
 	r, err := u.Download(context.Background(), 0, azblob.CountToEnd, azblob.BlobAccessConditions{}, false)
 	if err != nil {
-		return []dataprotection.RotationKey{}, nil
+		return []dataprotection.SymmetricKey{}, nil
 	}
 
 	stream := r.Body(azblob.RetryReaderOptions{MaxRetryRequests: 3})
@@ -191,7 +209,7 @@ func (bf *BlobFile) downloadKeys(u azblob.BlobURL) ([]dataprotection.RotationKey
 		return nil, fmt.Errorf("blob file: unmarshalling file failed: %w", err)
 	}
 
-	var keys []dataprotection.RotationKey
+	var keys []dataprotection.SymmetricKey
 	for _, ak := range azureKeys {
 		notBefore, err := time.Parse(time.RFC3339, ak.NotBefore)
 		if err != nil {
@@ -208,7 +226,7 @@ func (bf *BlobFile) downloadKeys(u azblob.BlobURL) ([]dataprotection.RotationKey
 			continue
 		}
 
-		keys = append(keys, dataprotection.RotationKey{
+		keys = append(keys, dataprotection.SymmetricKey{
 			ID:        ak.ID,
 			Secret:    decodedSecret,
 			NotBefore: notBefore,
@@ -219,7 +237,7 @@ func (bf *BlobFile) downloadKeys(u azblob.BlobURL) ([]dataprotection.RotationKey
 	return keys, nil
 }
 
-func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationKey, skipLease bool) error {
+func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.SymmetricKey, skipLease bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
@@ -302,5 +320,5 @@ func (bf *BlobFile) initBlob() error {
 		return err
 	}
 
-	return bf.uploadKeys(u, []dataprotection.RotationKey{}, true)
+	return bf.uploadKeys(u, []dataprotection.SymmetricKey{}, true)
 }

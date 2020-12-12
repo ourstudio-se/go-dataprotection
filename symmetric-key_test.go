@@ -14,12 +14,12 @@ import (
 func TestValid(t *testing.T) {
 	table := []struct {
 		name     string
-		key      RotationKey
+		key      SymmetricKey
 		expected bool
 	}{
 		{
 			name: "Within date range",
-			key: RotationKey{
+			key: SymmetricKey{
 				NotBefore: time.Now().UTC().Add(-1 * time.Hour),
 				NotAfter:  time.Now().UTC().Add(1 * time.Hour),
 			},
@@ -27,7 +27,7 @@ func TestValid(t *testing.T) {
 		},
 		{
 			name: "Expired",
-			key: RotationKey{
+			key: SymmetricKey{
 				NotBefore: time.Now().UTC().Add(-1 * time.Hour),
 				NotAfter:  time.Now().UTC().Add(-1 * time.Minute),
 			},
@@ -35,7 +35,7 @@ func TestValid(t *testing.T) {
 		},
 		{
 			name: "Not yet active",
-			key: RotationKey{
+			key: SymmetricKey{
 				NotBefore: time.Now().UTC().Add(1 * time.Minute),
 				NotAfter:  time.Now().UTC().Add(1 * time.Hour),
 			},
@@ -56,7 +56,7 @@ func TestEncodeID(t *testing.T) {
 	_, err := rand.Read(b)
 	assert.NoError(t, err)
 
-	key := RotationKey{}
+	key := SymmetricKey{}
 	key.ID = hex.EncodeToString(b)
 
 	actual := key.EncodeID()
@@ -70,7 +70,7 @@ func TestExtractKeyID(t *testing.T) {
 	_, err := rand.Read(b)
 	assert.NoError(t, err)
 
-	key := RotationKey{}
+	key := SymmetricKey{}
 	key.ID = hex.EncodeToString(b)
 
 	expected := key.EncodeID()

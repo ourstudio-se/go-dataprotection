@@ -58,13 +58,13 @@ func TestProtectUnprotectWithKeyLookup(t *testing.T) {
 }
 
 func TestNewest(t *testing.T) {
-	k1 := RotationKey{
+	k1 := SymmetricKey{
 		ID:        "k1",
 		Secret:    []byte("abc"),
 		NotAfter:  time.Now().UTC(),
 		NotBefore: time.Now().UTC().Add(time.Hour * -2),
 	}
-	k2 := RotationKey{
+	k2 := SymmetricKey{
 		ID:        "k2",
 		Secret:    []byte("cba"),
 		NotAfter:  time.Now().UTC().Add(time.Hour * 2),
@@ -72,7 +72,7 @@ func TestNewest(t *testing.T) {
 	}
 
 	sut := &AES256{}
-	sut.keyset = map[string]RotationKey{
+	sut.keyset = map[string]SymmetricKey{
 		"k1": k1,
 		"k2": k2,
 	}

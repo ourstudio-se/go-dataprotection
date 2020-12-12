@@ -6,32 +6,45 @@ import (
 	"path/filepath"
 )
 
+// Backend is an interface to accept any
+// storage medium for the SymmetricKey set
 type Backend interface {
-	GetKeys() ([]RotationKey, error)
-	AddKey(RotationKey) error
+	GetKeys() ([]SymmetricKey, error)
+	AddKey(SymmetricKey) error
 }
 
 type schemer interface {
-	GenerateKey() (RotationKey, error)
-	WithKey(RotationKey) error
+	GenerateKey() (SymmetricKey, error)
+	WithKey(SymmetricKey) error
 	Protect([]byte) ([]byte, error)
 	Unprotect([]byte) ([]byte, error)
 }
 
+// Scheme defines which encryption and
+// signature scheme to use
 type Scheme string
 
 const (
+	// AES256_HMACSHA256 is the default scheme
 	AES256_HMACSHA256 Scheme = "AES256_HMACSHA256"
 )
 
+// Protector acts as a proxy for storing and using
+// SymmetricKey sets, allowing for protecting and
+// unprotecting secrets - as well as handling any
+// rotation policies
 type Protector struct {
 	backend Backend
 	scheme  Scheme
 	impl    schemer
 }
 
+// ProtectorOption handles functional options for
+// setting up a Protector
 type ProtectorOption func(*Protector) error
 
+// WithBackend specifies a new storage medium
+// for any SymmetricKey set
 func WithBackend(backend Backend) ProtectorOption {
 	return func(p *Protector) error {
 		p.backend = backend
@@ -39,6 +52,12 @@ func WithBackend(backend Backend) ProtectorOption {
 	}
 }
 
+// New instantiates a new Protector with a
+// specified scheme and options
+//
+// Example:
+//   New(AES256_HMACSHA256,
+//		WithBackend(&CustomBackend{}))
 func New(scheme Scheme, opts ...ProtectorOption) (*Protector, error) {
 	p := &Protector{
 		backend: nil,
@@ -96,6 +115,8 @@ func New(scheme Scheme, opts ...ProtectorOption) (*Protector, error) {
 	return p, nil
 }
 
+// WithRotationPolicy adds a rotation policy
+// for the SymmetricKey protector
 func (p *Protector) WithRotationPolicy(policy Policy) (*KeyRotator, error) {
 	kr, err := NewKeyRotationPolicy(policy, p)
 	if err != nil {
@@ -105,10 +126,14 @@ func (p *Protector) WithRotationPolicy(policy Policy) (*KeyRotator, error) {
 	return kr, nil
 }
 
+// Protect a secret, returning a signed and encrypted
+// value of it
 func (p *Protector) Protect(b []byte) ([]byte, error) {
 	return p.impl.Protect(b)
 }
 
+// Unprotect a signed and encrypted value, returning
+// the protected secret
 func (p *Protector) Unprotect(b []byte) ([]byte, error) {
 	return p.impl.Unprotect(b)
 }
