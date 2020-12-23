@@ -7,21 +7,35 @@ import (
 	"github.com/mileusna/crontab"
 )
 
+// Policy defines a key rotation scheme
 type Policy string
 
 const (
-	RotateDaily     Policy = Policy("0 0 * * *")
-	RotateWeekly           = Policy("0 0 * * 0")
-	RotateMonthly          = Policy("0 0 1 * *")
-	RotateQuarterly        = Policy("0 0 1 */3 *")
+	// RotateDaily forces a key rotation every day
+	// at midnight
+	RotateDaily Policy = Policy("0 0 * * *")
+
+	// RotateWeekly forces a key rotation every week
+	RotateWeekly = Policy("0 0 * * 0")
+
+	// RotateMonthly forces a key rotation every month
+	RotateMonthly = Policy("0 0 1 * *")
+
+	// RotateQuarterly forces a key rotation every three months
+	RotateQuarterly = Policy("0 0 1 */3 *")
 )
 
+// KeyRotator is an implementation of handling
+// key rotation on a schedule
 type KeyRotator struct {
 	backend Backend
 	impl    schemer
 	errch   chan error
 }
 
+// NewKeyRotationPolicy sets up key rotation for a Protector,
+// with a specified rotation policy: RotateDaily, RotateWeekly,
+// RotateMontly, or RotateQuarterly
 func NewKeyRotationPolicy(policy Policy, p *Protector) (*KeyRotator, error) {
 	if err := validateRotationPolicy(policy); err != nil {
 		return nil, fmt.Errorf("rotation policy: invalid policy: %w", err)
@@ -42,6 +56,8 @@ func NewKeyRotationPolicy(policy Policy, p *Protector) (*KeyRotator, error) {
 	return kr, nil
 }
 
+// Errors returns a channel for reading any errors
+// occurring during key rotation
 func (kr *KeyRotator) Errors() <-chan error {
 	return kr.errch
 }
