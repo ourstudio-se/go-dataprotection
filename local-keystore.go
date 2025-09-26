@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"time"
 )
 
@@ -32,9 +32,9 @@ func WithFile(fp string) ProtectorOption {
 }
 
 func (l *localKeyFile) GetKeys() ([]RotationKey, error) {
-	b, err := ioutil.ReadFile(l.fp)
+	b, err := os.ReadFile(l.fp)
 	if err != nil {
-		if err := ioutil.WriteFile(l.fp, []byte("[]"), 0644); err != nil {
+		if err := os.WriteFile(l.fp, []byte("[]"), 0o644); err != nil {
 			return nil, fmt.Errorf("local file error: %w", err)
 		}
 		b = []byte("[]")
@@ -93,7 +93,7 @@ func (l *localKeyFile) AddKey(key RotationKey) error {
 		return fmt.Errorf("local file error: could not serialize keys")
 	}
 
-	if err := ioutil.WriteFile(l.fp, raw, 0644); err != nil {
+	if err := os.WriteFile(l.fp, raw, 0o644); err != nil {
 		return fmt.Errorf("local file error: could not write keys")
 	}
 

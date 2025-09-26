@@ -1,27 +1,31 @@
 package azure
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
+	"io"
 	"time"
 
-	"github.com/Azure/azure-storage-blob-go/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/lease"
 	"github.com/google/uuid"
 	"github.com/ourstudio-se/go-dataprotection"
 )
 
-const defaultContainerName = "dataprotection"
-const defaultBlobFileName = "data-protection-keys"
+const (
+	defaultContainerName = "dataprotection"
+	defaultBlobFileName  = "data-protection-keys"
+)
 
 type BlobConfig struct {
 	accountName string
-	credential  azblob.Credential
+	credential  *azblob.SharedKeyCredential
 	container   string
 	filename    string
 }
@@ -103,10 +107,13 @@ func New(opts ...BlobConfigOption) (*BlobFile, error) {
 	}
 
 	bf := &BlobFile{cfg, nil}
-	u, err := bf.containerURL()
+
+	// Create container if it doesn't exist
+	containerClient, err := bf.containerClient()
 	if err != nil {
-		return nil, fmt.Errorf("blob file: container error: %w", err)
+		return nil, fmt.Errorf("blob file: failed to create client: %w", err)
 	}
+	_, _ = containerClient.Create(context.Background(), nil)
 
 	exist, err := bf.blobExist()
 	if err != nil {
@@ -119,17 +126,11 @@ func New(opts ...BlobConfigOption) (*BlobFile, error) {
 		}
 	}
 
-	_, _ = u.Create(context.Background(), azblob.Metadata{}, azblob.PublicAccessNone)
 	return bf, nil
 }
 
 func (bf *BlobFile) GetKeys() ([]dataprotection.RotationKey, error) {
-	u, err := bf.blobURL()
-	if err != nil {
-		return nil, fmt.Errorf("blob file: failed connecting to blob: %w", err)
-	}
-
-	keys, err := bf.downloadKeys(u)
+	keys, err := bf.downloadKeys()
 	if err != nil {
 		return nil, err
 	}
@@ -141,12 +142,7 @@ func (bf *BlobFile) GetKeys() ([]dataprotection.RotationKey, error) {
 func (bf *BlobFile) AddKey(key dataprotection.RotationKey) error {
 	keys := append(bf.keys, key)
 
-	u, err := bf.blobURL()
-	if err != nil {
-		return fmt.Errorf("blob file: failed connecting to blob: %w", err)
-	}
-
-	if err := bf.uploadKeys(u, keys, false); err != nil {
+	if err := bf.uploadKeys(keys, false); err != nil {
 		return err
 	}
 
@@ -154,40 +150,54 @@ func (bf *BlobFile) AddKey(key dataprotection.RotationKey) error {
 	return nil
 }
 
-func (bf *BlobFile) containerURL() (azblob.ContainerURL, error) {
-	p := azblob.NewPipeline(bf.cfg.credential, azblob.PipelineOptions{})
-	u, err := url.Parse(fmt.Sprintf("https://%s.blob.core.windows.net/%s", bf.cfg.accountName, bf.cfg.container))
+func (bf *BlobFile) client() (*azblob.Client, error) {
+	serviceURL := fmt.Sprintf("https://%s.blob.core.windows.net/", bf.cfg.accountName)
+	client, err := azblob.NewClientWithSharedKeyCredential(serviceURL, bf.cfg.credential, nil)
 	if err != nil {
-		return azblob.ContainerURL{}, err
+		return nil, err
 	}
-
-	return azblob.NewContainerURL(*u, p), nil
+	return client, nil
 }
 
-func (bf *BlobFile) blobURL() (azblob.BlobURL, error) {
-	u, err := bf.containerURL()
+func (bf *BlobFile) containerClient() (*container.Client, error) {
+	client, err := bf.client()
 	if err != nil {
-		return azblob.BlobURL{}, err
+		return nil, err
 	}
-
-	return u.NewBlobURL(bf.cfg.filename), nil
+	return client.ServiceClient().NewContainerClient(bf.cfg.container), nil
 }
 
-func (bf *BlobFile) downloadKeys(u azblob.BlobURL) ([]dataprotection.RotationKey, error) {
-	r, err := u.Download(context.Background(), 0, azblob.CountToEnd, azblob.BlobAccessConditions{}, false)
+func (bf *BlobFile) blobClient() (*blob.Client, error) {
+	containerClient, err := bf.containerClient()
 	if err != nil {
-		return []dataprotection.RotationKey{}, nil
+		return nil, err
+	}
+	return containerClient.NewBlobClient(bf.cfg.filename), nil
+}
+
+func (bf *BlobFile) downloadKeys() ([]dataprotection.RotationKey, error) {
+	blobClient, err := bf.blobClient()
+	if err != nil {
+		return nil, fmt.Errorf("blob file: failed to create client: %w", err)
 	}
 
-	stream := r.Body(azblob.RetryReaderOptions{MaxRetryRequests: 3})
-	buf := bytes.Buffer{}
-	_, err = buf.ReadFrom(stream)
+	resp, err := blobClient.DownloadStream(context.Background(), nil)
+	if err != nil {
+		// Return empty list if blob doesn't exist
+		if bloberror.HasCode(err, bloberror.BlobNotFound) {
+			return []dataprotection.RotationKey{}, nil
+		}
+		return nil, fmt.Errorf("blob file: failed to download: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("blob file: reading file failed: %w", err)
 	}
 
 	var azureKeys []*azureKeyFileFormat
-	if err := json.Unmarshal(buf.Bytes(), &azureKeys); err != nil {
+	if err := json.Unmarshal(data, &azureKeys); err != nil {
 		return nil, fmt.Errorf("blob file: unmarshalling file failed: %w", err)
 	}
 
@@ -219,20 +229,36 @@ func (bf *BlobFile) downloadKeys(u azblob.BlobURL) ([]dataprotection.RotationKey
 	return keys, nil
 }
 
-func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationKey, skipLease bool) error {
+func (bf *BlobFile) uploadKeys(keys []dataprotection.RotationKey, skipLease bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
-	leaseID := uuid.New().String()
-	azBlobAccessConditions := azblob.BlobAccessConditions{}
-	if !skipLease {
-		_, err := u.AcquireLease(ctx, leaseID, 60, azblob.ModifiedAccessConditions{})
-		if err != nil {
-			return fmt.Errorf("blob file: could not lock key file: %w", err)
-		}
+	blobClient, err := bf.blobClient()
+	if err != nil {
+		return fmt.Errorf("blob file: failed to create client: %w", err)
+	}
 
-		azBlobAccessConditions.LeaseAccessConditions = azblob.LeaseAccessConditions{
+	var leaseID *string
+	var blobLeaseClient *lease.BlobClient
+
+	if !skipLease {
+		// Acquire lease
+		leaseUUID := uuid.New().String()
+		leaseID = &leaseUUID
+		blobLeaseClient, _ = lease.NewBlobClient(blobClient, &lease.BlobClientOptions{
 			LeaseID: leaseID,
+		})
+
+		if blobLeaseClient != nil {
+			_, err := blobLeaseClient.AcquireLease(ctx, 60, nil)
+			if err != nil {
+				// If we can't acquire a lease, it might be because the blob doesn't exist yet
+				// In that case, we'll create it without a lease
+				if !bloberror.HasCode(err, bloberror.BlobNotFound) {
+					return fmt.Errorf("blob file: could not lock key file: %w", err)
+				}
+				leaseID = nil
+			}
 		}
 	}
 
@@ -253,54 +279,50 @@ func (bf *BlobFile) uploadKeys(u azblob.BlobURL, keys []dataprotection.RotationK
 		return fmt.Errorf("blob file: could not serialize JSON: %w", err)
 	}
 
-	_, err = u.ToBlockBlobURL().Upload(ctx,
-		bytes.NewReader(b),
-		azblob.BlobHTTPHeaders{},
-		azblob.Metadata{},
-		azBlobAccessConditions)
+	// Upload blob
+	uploadOptions := &azblob.UploadBufferOptions{}
+	if leaseID != nil {
+		uploadOptions.AccessConditions = &blob.AccessConditions{
+			LeaseAccessConditions: &blob.LeaseAccessConditions{
+				LeaseID: leaseID,
+			},
+		}
+	}
+
+	client, err := bf.client()
+	if err != nil {
+		return fmt.Errorf("blob file: failed to create client: %w", err)
+	}
+	_, err = client.UploadBuffer(ctx, bf.cfg.container, bf.cfg.filename, b, uploadOptions)
 	if err != nil {
 		return fmt.Errorf("blob file: failed to upload keys: %w", err)
 	}
 
-	if !skipLease {
-		_, _ = u.ReleaseLease(ctx, leaseID, azblob.ModifiedAccessConditions{})
+	if leaseID != nil && blobLeaseClient != nil {
+		_, _ = blobLeaseClient.ReleaseLease(ctx, nil)
 	}
 
 	return nil
 }
 
 func (bf *BlobFile) blobExist() (bool, error) {
-	u, err := bf.blobURL()
+	blobClient, err := bf.blobClient()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("blob file: failed to create client: %w", err)
 	}
 
-	_, err = u.GetProperties(context.Background(), azblob.BlobAccessConditions{})
+	_, err = blobClient.GetProperties(context.Background(), nil)
 	if err == nil {
 		return true, nil
 	}
 
-	storageErr, ok := err.(azblob.StorageError)
-	if !ok {
-		return false, err
-	}
-
-	if storageErr.Response().StatusCode == http.StatusNotFound {
+	if bloberror.HasCode(err, bloberror.BlobNotFound) {
 		return false, nil
 	}
 
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
+	return false, err
 }
 
 func (bf *BlobFile) initBlob() error {
-	u, err := bf.blobURL()
-	if err != nil {
-		return err
-	}
-
-	return bf.uploadKeys(u, []dataprotection.RotationKey{}, true)
+	return bf.uploadKeys([]dataprotection.RotationKey{}, true)
 }
