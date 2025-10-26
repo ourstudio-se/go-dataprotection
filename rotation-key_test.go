@@ -1,10 +1,9 @@
 package dataprotection
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"math/rand"
-	"strings"
 	"testing"
 	"time"
 
@@ -60,9 +59,9 @@ func TestEncodeID(t *testing.T) {
 	key.ID = hex.EncodeToString(b)
 
 	actual := key.EncodeID()
-	expected := base64.RawURLEncoding.Strict().EncodeToString([]byte(key.ID))
+	expected := base64.RawURLEncoding.Strict().EncodeToString([]byte(key.ID)[:8])
 
-	assert.True(t, strings.HasPrefix(expected, actual))
+	assert.Equal(t, expected, actual)
 }
 
 func TestExtractKeyID(t *testing.T) {
